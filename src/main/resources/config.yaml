@@ -1,0 +1,39 @@
+http:
+  port: "8091"
+  timeOut: "300000"
+
+Scheduler:
+  timeZone: "#[getDefault]"
+  cronTime: "0 0 3 * * ?"
+  wishlistCronTime: "0 30 * * * ?"
+
+AWS:
+  accessKey: "AKIAX2IJHTJ2Z4SG5LOA"
+  secretKey: "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"
+  bucketName: "company-g13"
+  accounts: "accounts.txt"
+  inventory: "inventory.csv"
+
+AWS_DB:
+  host: "dbtest.cpgitu7lx4bc.ap-south-1.rds.amazonaws.com"
+  port: "3306"
+  user: "admin"
+  pwd: "test1234"
+  
+BatchAggregate:
+  size: "10"
+  
+SalesForce:
+  user: "arunkumar.matheswaran@apisero.com"
+  password: "Arun@21081992"
+  securityToken: "D6er9EBoqqkIO3yCfoUlUDR7v"
+  
+Email:
+  host: "smtp.gmail.com"
+  port: "465"
+  user: "companyg13test@gmail.com"
+  password: "CompanyG13@TestUser"
+  
+VM:
+  queue: "wishlist"
+  maxMsg: "10"

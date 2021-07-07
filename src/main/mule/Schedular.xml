@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:email="http://www.mulesoft.org/schema/mule/email" xmlns:vm="http://www.mulesoft.org/schema/mule/vm"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:s3="http://www.mulesoft.org/schema/mule/s3" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/s3 http://www.mulesoft.org/schema/mule/s3/current/mule-s3.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd">
+	<flow name="SchedulerFlow" doc:id="09235bcd-732a-47c9-8585-77ff52cf5260">
+		<scheduler doc:name="Scheduler" doc:id="d890425f-ca4c-47cc-b9cf-7750209152e3" >
+			<scheduling-strategy >
+				<cron expression="${Scheduler.cronTime}" timeZone="${Scheduler.timeZone}" />
+			</scheduling-strategy>
+		</scheduler>
+		<logger level="INFO" doc:name="Start" doc:id="9e765c82-0b8c-41ea-8d74-94e881b20319" message="Scheduler Flow Started"/>
+		<flow-ref doc:name="inventoryFileLoad" doc:id="08890bf8-0203-4307-8904-326b048f8321" name="inventoryFileLoad" />
+		<logger level="INFO" doc:name="Complete" doc:id="eb0c6521-53df-4b86-9df1-af84ed2aa568" message="Scheduler Flow Completed"/>
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="a98429a1-4410-403e-9789-d5d3f19df1b1" type="ANY">
+				<flow-ref doc:name="httpStatus-500" doc:id="d0ff526a-4547-4344-ac02-88f2120c5bc1" name="httpStatus-500"/>
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+	<flow name="sendEmailFlow" doc:id="3f354cfd-c75d-4f98-a3a4-1378a87a5e0a" >
+		<logger level="INFO" doc:name="Send Email Flow Started" doc:id="028ca8c4-e106-4074-b727-a06f35093206" message="Send Email Flow Started"/>
+		<email:send doc:name="Send" doc:id="52dac5ae-87ad-4a55-8f6d-cca8690f19d8" config-ref="Email_SMTP" subject="CompanyG13 Alert">
+						<email:to-addresses>
+							<email:to-address value="#[payload.email]" />
+						</email:to-addresses>
+						<email:body>
+							<email:content><![CDATA[#[output text/plain
+---
+vars.Msg]]]></email:content>
+						</email:body>
+					</email:send>
+		<set-payload value="Email has been sent successfully" doc:name="Set Payload" doc:id="aaf783c5-7a84-4f5e-85bb-7076cec842d5" />
+		<logger level="INFO" doc:name="Send Email Flow Completed" doc:id="84ea4143-0df3-4d6b-b685-d991ed5089e1" message="Send Email Flow Completed"/>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="2a2cd5de-b49f-41b3-9e8c-6d89fdb2f036" type="ANY">
+				<logger level="ERROR" doc:name="Logger" doc:id="de87ae7e-964d-4282-8685-95682f4878e0" message="#[error.description]"/>
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="inventoryFileLoad" doc:id="32cf7078-de56-4bb7-aa0d-eb8c05f4df44">
+		<s3:get-object doc:name="GetInventoryFile" doc:id="145947f6-73ed-4f54-860c-6335e8b7aa7c" config-ref="Amazon_S3_Configuration" bucketName="${AWS.bucketName}" key="${AWS.inventory}" />
+		<ee:transform doc:name="InventoryData" doc:id="418430e9-ab09-40ef-9d2d-c1a644c72d78" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+payload map ( o,i ) -> {
+
+	Name: o.Name,
+	Category: o.Category,
+	Quantity: o.Quantity,
+	ProductType: o.ProductType,
+	Price: o.Price
+	
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<batch:job jobName="inventoryBatch" doc:id="5459407c-060b-455e-8f66-7bd01c881174" >
+			<batch:process-records >
+				<batch:step name="inventoryExistsCheck" doc:id="5636caa5-e75d-4d48-bc7d-6746fec32137" >
+					<db:select doc:name="inventoryCheck" doc:id="adc22c0b-af10-486a-8d9b-bc995ce35e63" config-ref="DB_AWS" target="data">
+						<db:sql ><![CDATA[select * from test.inventory where Name= :name and Category= :category]]></db:sql>
+						<db:input-parameters ><![CDATA[#[{name: payload.Name,
+ category: payload.Category
+}]]]></db:input-parameters>
+					</db:select>
+				</batch:step>
+				<batch:step name="inventoryInsertBatch" doc:id="f2080b8e-0386-4852-a91e-2e3181605b77" acceptExpression="#[isEmpty(vars.data)]">
+					<batch:aggregator doc:name="inventoryInsert" doc:id="9ba0f583-2361-422f-bcf0-e191a7608180" size="${BatchAggregate.size}">
+						<ee:transform doc:name="inventoryInsertData" doc:id="78a65995-0602-4943-9f5e-4887edc4e47b" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+ payload map ( obj,in ) -> {
+	
+	name: obj.Name,
+	category: obj.Category,
+	quantity: obj.Quantity,
+	productType: obj.ProductType,
+	price: obj.Price
+}
+]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<db:bulk-insert doc:name="inventoryInsert" doc:id="fcd4709a-0bd6-4e98-9ae3-2322c31504ea" config-ref="DB_AWS">
+							<db:sql ><![CDATA[insert into test.inventory (Name,Category,Quantity,ProductType,Price) values (:name,:category,:quantity,:productType,:price)]]></db:sql>
+						</db:bulk-insert>
+					</batch:aggregator>
+				</batch:step>
+				<batch:step name="inventoryUpdateBatch" doc:id="efee4e0d-5f87-4584-ae4c-0b76f627374b" acceptExpression="#[not isEmpty(vars.data)]">
+					<batch:aggregator doc:name="inventoryUpdate" doc:id="e3d6ec04-2fac-46b0-9c42-49231c82ce55" size="${BatchAggregate.size}">
+						<ee:transform doc:name="inventoryUpdateData" doc:id="d49e1e4c-386d-4262-b7e9-20035246f2d1" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+ payload map ( obj,in ) -> {
+	
+	name: obj.Name,
+	category: obj.Category,
+	quantity: obj.Quantity,
+	productType: obj.ProductType,
+	price: obj.Price
+}
+]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<db:bulk-update doc:name="inventoryUpdate" doc:id="04b8acf1-6f77-4f9e-9d4b-c766f046628c" config-ref="DB_AWS">
+							<db:sql ><![CDATA[update test.inventory set Name=:name,Category=:category,Quantity=:quantity,ProductType=:productType,Price=:price where Name=:name and Category=:category]]></db:sql>
+						</db:bulk-update>
+					</batch:aggregator>
+				</batch:step>
+			</batch:process-records>
+		</batch:job>
+		<logger level="INFO" doc:name="Logger" doc:id="3c90f55f-3a4c-4f7d-b4a2-1ffa5ff9438e" message="#[payload]" />
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="61d19763-7e2d-4660-b7b5-2273982bd472" type="ANY">
+				<flow-ref doc:name="httpStatus-500" doc:id="69aef342-550d-42c9-bccd-093aaf45f111" name="httpStatus-500"/>
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+	<flow name="WLF" doc:id="5f98990f-4967-4d6b-b087-fd8d31dde3c6" >
+		<vm:listener queueName="wishlist" doc:name="Listener" doc:id="053db5f8-dc6e-4c9f-8cc1-da5d22358163" config-ref="VM_Config"/>
+		<ee:transform doc:name="Transform Message" doc:id="f23ab965-1c09-4d09-bc46-a5879e22f284">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+payload map (o,i) -> {
+	
+	userId: o.userId,
+	itemName: o.itemName,
+	itemCategory: o.itemCategory,
+	price: o.price,
+	email: o.email
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+		<flow-ref doc:name="getStocks" doc:id="c135e1d6-4738-49e1-a950-5221c6c456f7" name="getStocks" target="getStocks" />
+		<foreach doc:name="stocksForEach" doc:id="37efb632-41d9-49fe-8a48-71d2ed888c39">
+				<set-variable value="#[vars.getStocks filter ((o,i) -&gt; (o.Name == payload.itemName and o.Category == payload.itemCategory))]" doc:name="filterStocks" doc:id="02680c19-c693-4b4a-8c74-52ba61fcdbed" variableName="filterStocks" />
+				<choice doc:name="Choice" doc:id="ed3b2dc0-3df2-4c61-a149-e27a74eda02e">
+					<when expression="#[vars.filterStocks.Quantity[0] as Number == 0]">
+					<set-variable value="#[&quot;The Item '&quot; ++ vars.filterStocks.Name[0] as String ++ &quot;:&quot; ++  vars.filterStocks.Category[0] as String ++&quot;' is Out Of Stock!!!!&quot;]" doc:name="setMsg" doc:id="0ffdb306-c651-4728-8838-193bbfd31635" variableName="Msg"/>
+					<flow-ref doc:name="sendEmailFlow" doc:id="8bb4f719-727b-47a2-888f-a52c49d05eb9" name="sendEmailFlow" target="sendEmailFlow"/>
+					</when>
+					<when expression="#[vars.filterStocks.Price[0] as Number != payload.price]">
+					<set-variable value="#[&quot;The Item '&quot; ++ vars.filterStocks.Name[0] as String ++ &quot;:&quot; ++  vars.filterStocks.Category[0] ++&quot;' Price has been changed. The new Price is '&quot; ++ vars.filterStocks.Price[0] as String ++&quot;' Rupees&quot;]" doc:name="setMsg" doc:id="831fe2ce-d328-4a8a-8a73-082fc2cae854" variableName="Msg"/>
+					<flow-ref doc:name="sendEmailFlow" doc:id="6bf4bd19-91a3-4562-ae93-a8960c10ffb8" name="sendEmailFlow" target="sendEmailFlow"/>
+					<ee:transform doc:name="Transform Message" doc:id="c571354f-66e5-4293-95eb-759759a2fbc4">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{
+	userId: payload.userId as Number,
+	itemName: vars.filterStocks[0].Name as String,
+	itemCategory: vars.filterStocks[0].Category as String,
+	price: vars.filterStocks[0].Price as Number
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<db:update doc:name="Update" doc:id="b646b781-d567-4106-8b68-87b5166452e5" config-ref="DB_AWS">
+						<db:sql ><![CDATA[update test.userWishlist set price=:price where userId=:userId and itemName=:itemName and itemCategory=:itemCategory]]></db:sql>
+						<db:input-parameters ><![CDATA[#[{ userId: payload.userId,
+  itemName: payload.itemName,
+  itemCategory: payload.itemCategory,
+  price: payload.price
+	
+}]]]></db:input-parameters>
+					</db:update>
+					<logger level="INFO" doc:name="Logger" doc:id="5069b413-dfb4-49f7-b773-7eceac9afba8" />
+					</when>
+					<otherwise>
+						<ee:transform doc:name="Transform Message" doc:id="57b08407-5bca-4f1d-86e3-1ca3f162a950">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+{
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+					</otherwise>
+				</choice>
+			</foreach>
+		<logger level="INFO" doc:name="Logger" doc:id="74fb1c32-a8fc-4d5c-b624-d51e5f73296a" />
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="775f1b1a-3552-4602-a210-708d63e68bf6" type="ANY" >
+				<flow-ref doc:name="httpStatus-500" doc:id="b2c9978b-efb0-48da-a5ce-ab14a80da276" name="httpStatus-500" />
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+	<flow name="wishlistFlow" doc:id="264e8756-b942-42a3-b89f-71e5fd42df7e" >
+		<scheduler doc:name="wishlistScheduler" doc:id="94a3f5cb-6ca6-4e1f-8f44-650f03a08688" >
+			<scheduling-strategy >
+				<cron expression="${Scheduler.wishlistCronTime}" timeZone="${Scheduler.timeZone}" />
+			</scheduling-strategy>
+		</scheduler>
+		<salesforce:query doc:name="user" doc:id="c0471def-9da7-4cdd-834d-e9467cc49bc6" config-ref="Salesforce_Config">
+			<salesforce:salesforce-query ><![CDATA[select Name,userEmail__c from userAccount__c]]></salesforce:salesforce-query>
+		</salesforce:query>
+		<db:select doc:name="userWishlist" doc:id="209d4841-09bd-41fd-9310-e6176f98a3c9" config-ref="DB_AWS" target="userWishlist">
+			<db:sql ><![CDATA[select userId,itemName,itemCategory,price from test.userWishlist]]></db:sql>
+		</db:select>
+		<foreach doc:name="wishlistForEach" doc:id="d0a64d57-9bdd-4af4-a47f-545a22d037ce" >
+			<set-variable value="#[vars.userWishlist filter ((o,i) -&gt; (o.userId == payload.Name as Number))]" doc:name="filterWishlist" doc:id="38a43224-bcff-4652-8aa6-8b934bd5fa54" variableName="filterWishlist"/>
+			<set-variable value="#[output application/json&#10;---&#10;vars.filterWishlist map (o,i) -&gt; {&#10;	&#10;	userId: o.userId,&#10;	itemName: o.itemName,&#10;	itemCategory:o.itemCategory,&#10;	price: o.price,&#10;	email: payload.userEmail__c&#10;	&#10;}]" doc:name="userFilteredWishlist" doc:id="90de67dd-1c2a-4d55-b9e8-f7ef0740adf9" variableName="userFilteredWishlist"/>
+			<vm:publish queueName="wishlist" doc:name="Publish" doc:id="8fb380f8-51d7-4cd5-abb6-9f32707d19a1" config-ref="VM_Config">
+				<vm:content ><![CDATA[#[vars.userFilteredWishlist]]]></vm:content>
+			</vm:publish>
+		</foreach>
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="46109bdc-61f7-497f-a846-bd2b62985c9a" type="ANY" >
+				<flow-ref doc:name="httpStatus-500" doc:id="4130e79b-6dae-47d0-b583-4c16eb3c3d11" name="httpStatus-500" />
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+</mule>

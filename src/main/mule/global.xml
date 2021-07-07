@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:tls="http://www.mulesoft.org/schema/mule/tls" xmlns:email="http://www.mulesoft.org/schema/mule/email"
+	xmlns:vm="http://www.mulesoft.org/schema/mule/vm"
+	xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway" xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:s3="http://www.mulesoft.org/schema/mule/s3" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/s3 http://www.mulesoft.org/schema/mule/s3/current/mule-s3.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd
+http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd">
+	<configuration-properties doc:name="Configuration properties" doc:id="5d012d89-6421-4eaa-996c-f9f42b39920b" file="config.yaml" />
+	<s3:config name="Amazon_S3_Configuration" doc:name="Amazon S3 Configuration" doc:id="6f33329f-889b-4ae1-bba2-9991f80431ad" >
+		<s3:basic-connection accessKey="${AWS.accessKey}" secretKey="${AWS.secretKey}" region="AP_SOUTH_1" />
+	</s3:config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="50e0f778-729d-4d98-97aa-331390bc2aaf" >
+		<http:listener-connection host="0.0.0.0" port="${http.port}" connectionIdleTimeout="${http.timeOut}"/>
+	</http:listener-config>
+	<db:config name="DB_AWS" doc:name="Database Config" doc:id="55ec6e86-83a8-4778-a75d-482096edd278" >
+		<db:my-sql-connection host="${AWS_DB.host}" port="${AWS_DB.port}" user="${AWS_DB.user}" password="${AWS_DB.pwd}" />
+	</db:config>
+	<salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce Config" doc:id="24b9b3be-6588-4ea3-87d3-232a507bb542" >
+		<salesforce:basic-connection username="${SalesForce.user}" password="${SalesForce.password}" securityToken="${SalesForce.securityToken}" />
+	</salesforce:sfdc-config>
+	<vm:config name="VM_Config" doc:name="VM Config" doc:id="0927d058-2cd2-4b1b-ba4c-fe327c981833" >
+		<vm:queues >
+			<vm:queue queueName="${VM.queue}" maxOutstandingMessages="${VM.maxMsg}" />
+		</vm:queues>
+	</vm:config>
+	<email:smtp-config name="Email_SMTP" doc:name="Email SMTP" doc:id="1552dbf3-4d8c-4650-ab3d-fe2d3c9840fd" >
+		<email:smtps-connection host="${Email.host}" user="${Email.user}" password="${Email.password}" port="${Email.port}">
+			<tls:context >
+				<tls:trust-store insecure="true" />
+			</tls:context>
+		</email:smtps-connection>
+	</email:smtp-config>
+	<api-gateway:autodiscovery apiId="17035652" ignoreBasePath="true" doc:name="API Autodiscovery" doc:id="7fcf5e44-c5d3-4daf-81c8-6780602a95b6" flowRef="order_api-main" />
+</mule>

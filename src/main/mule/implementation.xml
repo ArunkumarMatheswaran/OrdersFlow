@@ -1,0 +1,425 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:email="http://www.mulesoft.org/schema/mule/email" xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:batch="http://www.mulesoft.org/schema/mule/batch"
+	xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd">
+	<sub-flow name="httpStatus-500" doc:id="c300d212-b595-4b70-b766-c0425463d055" >
+		<set-variable value="500" doc:name="httpStatus-500" doc:id="3e7da462-1e67-4257-b6d7-47a58b81ca85" variableName="httpStatus" />
+		<logger level="INFO" doc:name="Logger" doc:id="e5050e15-0d04-471b-93df-a9fe21b17ef3" message="#[error.description]"/>
+	</sub-flow>
+	<flow name="getOrdersFlow" doc:id="22a55107-4add-4326-bc37-6ab08cc70b18" >
+		<db:select doc:name="orders" doc:id="e4e48b4f-8b72-4668-9bf1-29a804e063bb" config-ref="DB_AWS">
+			<db:sql ><![CDATA[select orderID,orderDate,userId,userName,totalAmount,paymentStatus from test.orderDetails]]></db:sql>
+		</db:select>
+		<choice doc:name="Choice" doc:id="03fbfee8-e32d-4fb0-95e3-265064448e0f" >
+			<when expression="#[not isEmpty(payload)]">
+				<db:select doc:name="orderItems" doc:id="9a414e68-0866-47ee-b7dd-9967510e5f47" config-ref="DB_AWS" target="orderItems">
+				<db:sql><![CDATA[select itemName,itemCategory,quantity,orderId from test.orderItemDetails]]></db:sql>
+			</db:select>
+				<foreach doc:name="For Each" doc:id="569eb532-dfab-40a2-a7fd-4449449260c5">
+			<set-variable value="#[vars.orderItems filter ((o,i) -&gt; (o.orderId == payload.orderId))]" doc:name="setOID" doc:id="7e2a2241-079d-4a24-8650-96b9398ba059" variableName="OID"/>
+					<ee:transform doc:name="Transform Message" doc:id="93fc38a1-01d0-499a-8f8b-7d8901988118">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+
+{
+	orderId: payload.orderId,
+	orderDate: payload.orderDate,
+	userId: payload.userId,
+	userName: payload.userName,
+	totalAmount: payload.totalAmount,
+	paymentStatus: payload.paymentStatus,
+	itemDetails: vars.OID map (o,i) -> {
+		
+		itemName: o.itemName,
+		category: o.itemCategory,
+		quantity: o.quantity
+	}
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+					<set-variable value="#[(vars.orders default []) + payload]" doc:name="setOrders" doc:id="49a3b18c-99f3-482a-a156-f6a07b2969b7" variableName="orders"/>
+		</foreach>
+				<ee:transform doc:name="Transform Message" doc:id="2d3cd7fb-5e9a-48b1-a43d-82b2e6c8faf4">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+vars.orders]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+			</when>
+			<otherwise >
+				<set-payload value='#[output application/json&#10;---&#10;{&#10;Error: "No records has been found since the table is empty!!!!!!!!!!"&#10;}]' doc:name="setPayload" doc:id="889b4db0-eef1-4109-8a6c-deabd28c09b3" />
+			</otherwise>
+		</choice>
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="29f23d4e-4e64-43cf-ac61-33233f61a6ce" type="ANY">
+				<flow-ref doc:name="httpStatus-500" doc:id="d3203504-74c3-4369-8e92-654759e75852" name="httpStatus-500"/>
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+	<flow name="postOrderFlow" doc:id="9afe17e4-09a8-4878-919a-a8606ad6fad9" >
+		<salesforce:query doc:name="selectUser" doc:id="8081f3e1-3d0d-4389-81e9-c535ccca7d69" config-ref="Salesforce_Config" target="existingUser">
+			<salesforce:salesforce-query><![CDATA[select Id,Name,userName__c,userPhone__c,userCity__c from userAccount__c where Name= ':name']]></salesforce:salesforce-query>
+			<salesforce:parameters><![CDATA[#[output application/java
+---
+{
+	"name" : payload.userId
+}]]]></salesforce:parameters>
+		</salesforce:query>
+		<choice doc:name="Choice" doc:id="8a7be612-6539-41fe-9bb9-31556e67a59b">
+			<when expression="#[not isEmpty(vars.existingUser)]">
+				<set-variable value="#[%dw 2.0&#10;output application/java&#10;---&#10;payload.itemDetails map (ob,in) -&gt; {&#10;	&#10;	name: ob.itemName,&#10;	category: ob.itemCategory,&#10;	quantity: ob.quantity&#10;	&#10;}]" doc:name="orderItemDetails" doc:id="b539c2c3-3925-4942-999b-2916a6f54279" variableName="orderItemDetails" />
+				<flow-ref doc:name="orderCreationFlow" doc:id="66c872bb-7aef-4dad-b6f3-a0b8af1ef111" name="orderCreateFlow" target="orderCreationFlow"/>
+				<choice doc:name="Choice" doc:id="b7f68307-05ce-4046-8d37-e19bd73d45cf">
+					<when expression="#[not isEmpty(vars.orderCreationFlow.totalPrice)]">
+						<db:insert doc:name="orderInsert" doc:id="f7bad838-56fb-4479-9a14-70bd2bd2d65d" config-ref="DB_AWS" target="orderInsert">
+							<db:sql ><![CDATA[insert into test.orderDetails (orderDate,userId,userName,userContact,userAddress,totalAmount,paymentStatus) values (now(),:userId,:userName,:userContact,:userAddress,:totalAmount,"Pending")]]></db:sql>
+							<db:input-parameters ><![CDATA[#[{
+	userId: vars.existingUser[0].Name,
+	userName: vars.existingUser[0].userName__c,
+	userContact: vars.existingUser[0].userPhone__c,
+	userAddress: vars.existingUser[0].userCity__c,
+	totalAmount: vars.orderCreationFlow.totalPrice
+}]]]></db:input-parameters>
+						</db:insert>
+						<db:select doc:name="orderIdSelect" doc:id="f7082b71-62da-4190-a857-1f26a0421296" config-ref="DB_AWS" target="orderIdSelect">
+							<db:sql ><![CDATA[select orderId from test.orderDetails]]></db:sql>
+						</db:select>
+						<ee:transform doc:name="Transform Message" doc:id="22e19c04-b660-4283-b99f-b13cfe275eea">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+vars.orderItemDetails map (o,i) -> {
+	
+	itemName: o.name,
+	itemCategory: o.category,
+	quantity: o.quantity,
+	orderId: max (vars.orderIdSelect.*orderId)
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+						<db:bulk-insert doc:name="orderItemInsert" doc:id="59c0837c-1737-4f6d-ad29-bcc93c051c3e" config-ref="DB_AWS" target="orderItemInsert">
+							<db:sql ><![CDATA[insert into test.orderItemDetails (itemName,itemCategory,quantity,orderId) values (:itemName,:itemCategory,:quantity,:orderId)]]></db:sql>
+						</db:bulk-insert>
+						<set-payload value="#[output application/json&#10;---&#10;{&#10;Success: &quot;Your Order has been successfully placed. The OrderId is '&quot; ++ max (vars.orderIdSelect.*orderId) as String ++ &quot;'&quot;&#10;}]" doc:name="Set Payload" doc:id="e1896267-37e2-4349-9c19-cba79d0ed7d1" />
+					</when>
+					<otherwise >
+						<set-payload value="#[output application/json&#10;---&#10;vars.orderCreationFlow map (o,i) -&gt;{&#10;Msg:&quot;The item '&quot; ++ o.name as String ++ &quot;:&quot; ++ vars.orderCreationFlow.category[i] as String ++ &quot;' is not available now. The current stock is '&quot; ++ vars.orderCreationFlow.quantity[i] as String ++ &quot;'. Sorry for the inconvenience!!!! &quot;&#10;&#10;}]" doc:name="Set Payload" doc:id="bae14bf0-92f5-4450-8c06-2eb6ad8e1fed" />
+					</otherwise>
+				</choice>
+			</when>
+			<otherwise>
+				<set-payload value="#[output application/json&#10;---&#10;{&#10;Error: &quot;The User ID '&quot; ++ payload.userId as String ++ &quot;' seems to be invalid. Kindly verify it!!!!!!!!&quot;&#10;}]" doc:name="Default" doc:id="d77d9acc-f1b9-428f-9a6b-99a26e7b43d9" />
+			</otherwise>
+		</choice>
+		<logger level="INFO" doc:name="Logger" doc:id="0f37836e-59a6-4daf-8630-06155231aa11" message="postOrdersFlow Completed"/>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="26ba7428-7e2e-4ef8-8e82-a528c578ee73" type="ANY">
+				<flow-ref doc:name="httpStatus-500" doc:id="692a6e2c-50f2-4528-8b3a-814f2dc5ddf5" name="httpStatus-500"/>
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="orderCreateFlow" doc:id="7651b19a-24b3-4eee-9c80-51e4cb8fe354">
+		<ee:transform doc:name="Transform Message" doc:id="5c7fc8bc-593a-4eb9-b9ba-86bc631bd9b1" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+vars.orderItemDetails map (ob,in) -> {
+	
+	name: ob.name,
+	category: ob.category,
+	quantity: ob.quantity
+	
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<flow-ref doc:name="getStocks" doc:id="2d370f88-e6b0-49ee-8560-1b6915a15016" name="getStocks" target="getStocks"/>
+		<foreach doc:name="For Each" doc:id="8e4dda3f-849f-4144-92c2-0bd0486f6f22">
+			<set-variable value="#[vars.getStocks filter ((o,i) -&gt; (o.Name == payload.name and o.Category == payload.category))]" doc:name="filterStocks" doc:id="6c15d1d6-8d0e-4387-9bea-6aa3f5f3ec2b" variableName="filterStocks"/>
+			<ee:transform doc:name="Transform Message" doc:id="731ba528-5925-4c6f-8151-d37e086827c4">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	itemName: vars.filterStocks[0].Name,
+	itemCategory:vars.filterStocks[0].Category,
+	quantity: vars.filterStocks[0].Quantity,
+	price: vars.filterStocks[0].Price
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="#[(vars.itemKey default []) + payload]" doc:name="itemKeySet" doc:id="fbe1123e-8751-4602-94e3-4a8a8f614c04" variableName="itemKey" />
+		</foreach>
+		<ee:transform doc:name="Transform Message" doc:id="a6c6e4d4-8ddc-41b8-972a-78446de772a3">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+fun subtract (A:Number,B:Number)=
+if(A>=B)
+(A - B)
+else
+A
+
+fun av (A:Number,B:Number)=
+if(A>=B)
+'true'
+else
+'false'
+
+fun multi(A:Number,B:Number)=
+(A*B)
+---
+
+vars.itemKey map (o,i) ->{
+	
+	name: o.itemName,
+	category: o.itemCategory,
+	price: multi(o.price,vars.orderItemDetails[i].quantity as Number),
+	quantity: subtract(o.quantity,vars.orderItemDetails[i].quantity as Number),
+	available: av(o.quantity,vars.orderItemDetails[i].quantity as Number)
+	}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+		<choice doc:name="Choice" doc:id="3a089647-9090-4539-9a9c-69926a57fa06">
+							<when expression="#[((payload.*available) contains 'false')]">
+				<ee:transform doc:name="Transform Message" doc:id="cf09fdf9-4a7f-4cb9-98f1-fb4963e5cd64">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload filter ((o,i) -> (o.available != "true") )]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+							</when>
+							<otherwise>
+				<db:bulk-update doc:name="Bulk update" doc:id="9a77f26d-5dbf-497b-847e-0268387455b6" config-ref="DB_AWS" target="itemsUpdatedInInventory">
+									<db:sql><![CDATA[update test.inventory set Name=:name,Category=:category,Quantity=:quantity where Name=:name and Category=:category]]></db:sql>
+								</db:bulk-update>
+				<ee:transform doc:name="Transform Message" doc:id="6810af5f-48d4-46e6-83ab-bd18a06c34e4">
+					<ee:message>
+						<ee:set-payload><![CDATA[output application/json
+---
+
+{totalPrice: sum (payload.*price) default 0
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+							</otherwise>
+						</choice>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="2dd53820-16a6-4c27-9a36-3548ba08e32e" type="ANY" >
+				<flow-ref doc:name="httpStatus-500" doc:id="a08c27cf-ab16-4773-b28c-35f61f0ad0e5" name="httpStatus-500" />
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="getStocks" doc:id="32bcd398-086d-4cd5-8135-1843b9b28ac8" >
+		<db:select doc:name="getStocks" doc:id="508f64b3-4167-4d3b-8a05-feffdbea5f3c" config-ref="DB_AWS">
+			<db:sql ><![CDATA[select Name,Category,Quantity,Price from test.inventory]]></db:sql>
+		</db:select>
+	</flow>
+	<flow name="orderRevertFlow" doc:id="7dced88d-8ed1-438f-8ec2-23a888c6117b">
+		<db:select doc:name="getOrderItemDetailsToRevert" doc:id="63ed08ed-bf7b-4543-83ff-d2346c4e9708" config-ref="DB_AWS" target="getOrderItemDetailsToRevert">
+			<db:sql><![CDATA[select itemName,itemCategory,quantity,orderId from test.orderItemDetails where orderId= :oid]]></db:sql>
+			<db:input-parameters><![CDATA[#[{oid: vars.getOrderToUpdate.orderId}]]]></db:input-parameters>
+		</db:select>
+		<ee:transform doc:name="Transform Message" doc:id="da26b4d2-f82e-4fb9-a2d4-4c35df863f15">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+vars.getOrderItemDetailsToRevert map (ob,in) -> {
+	
+	name: ob.itemName,
+	category: ob.itemCategory,
+	quantity: ob.quantity
+	
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<flow-ref doc:name="getStocks" doc:id="5fb49fa2-0f4d-4ead-8a0f-87fb2053b9d8" name="getStocks" target="getStocks"/>
+		<foreach doc:name="For Each" doc:id="7012d825-62c3-48e6-8bd4-4aae4e3defd2">
+			<set-variable value="#[vars.getStocks filter ((o,i) -&gt; (o.Name == payload.name and o.Category == payload.category))]" doc:name="filterStocks" doc:id="3cff1b99-bedc-4f69-af08-c5958fad755c" variableName="filterStocks"/>
+			<ee:transform doc:name="Transform Message" doc:id="e5f87e85-9393-41ee-a7b9-b5e3333d4746">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	itemName: vars.filterStocks[0].Name,
+	itemCategory:vars.filterStocks[0].Category,
+	quantity: vars.filterStocks[0].Quantity,
+	price: vars.filterStocks[0].Price
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="#[(vars.itemKeyUpdate default []) + payload]" doc:name="itemKeyUpdateSet" doc:id="f5765415-903f-491d-a091-cd525d007a1e" variableName="itemKeyUpdate" />
+		</foreach>
+		<ee:transform doc:name="Transform Message" doc:id="566897ca-825b-4385-a995-a303be1ba569">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+fun add (A:Number,B:Number)= 
+if(vars.orderRevert == 'true')
+A+B
+else
+A-B
+
+---
+
+vars.itemKeyUpdate map (o,i) ->{
+	
+	name: o.itemName,
+	category: o.itemCategory,
+	quantity: add(o.quantity,vars.getOrderItemDetailsToRevert[i].quantity as Number)
+	}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<db:bulk-update doc:name="updateStocks" doc:id="46fea72a-2b1a-42ca-9791-13c7e0b01439" config-ref="DB_AWS" target="itemsUpdatedInInventory">
+					<db:sql><![CDATA[update test.inventory set Name=:name,Category=:category,Quantity=:quantity where Name=:name and Category=:category]]></db:sql>
+				</db:bulk-update>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="2dc3cfd0-2f4a-4bec-8e0e-abd52daf25fb" type="ANY" >
+				<flow-ref doc:name="httpStatus-500" doc:id="286f0644-920a-4cba-a92f-b50755c5e9e1" name="httpStatus-500" />
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="getOrdersByIdFlow" doc:id="bdeb973f-2d53-4ee4-9920-7046310b0256" >
+		<db:query-single doc:name="order" doc:id="ac7a7b69-60bd-4a0a-b924-5bbc09d70e3c" config-ref="DB_AWS" target="order">
+			<db:sql><![CDATA[select orderId,orderDate,userId,userName,userContact,userAddress,totalAmount,paymentStatus from test.orderDetails where orderId= :oid]]></db:sql>
+			<db:input-parameters><![CDATA[#[{oid:attributes.uriParams.ID}]]]></db:input-parameters>
+		</db:query-single>
+		<choice doc:name="Choice" doc:id="7460c999-9f85-4f8d-a380-43f8bb67f3d2" >
+			<when expression="#[not isEmpty(vars.order)]">
+				<db:select doc:name="orderItems" doc:id="066376ed-1609-4ce6-ac8c-7df28df792e1" config-ref="DB_AWS">
+			<db:sql><![CDATA[select itemName,itemCategory,quantity,orderId from test.orderItemDetails where orderId= :oid]]></db:sql>
+			<db:input-parameters><![CDATA[#[{oid:attributes.uriParams.ID}]]]></db:input-parameters>
+		</db:select>
+				<ee:transform doc:name="Transform Message" doc:id="8ff6f403-2463-4d3b-801a-e471dada472c">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	orderId: vars.order.orderId,
+	orderDate: vars.order.orderDate,
+	userId: vars.order.userId,
+	userName: vars.order.userName,
+	userContact: vars.order.userContact,
+	userAddress: vars.order.userAddress,
+	totalAmount: vars.order.totalAmount,
+	paymentStatus: vars.order.paymentStatus,
+	itemDetails: payload map (o,i) -> {
+		
+		itemName: o.itemName,
+		category: o.itemCategory,
+		quantity: o.quantity
+	}
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+			</when>
+			<otherwise >
+				<set-payload value="#[output application/json&#10;---&#10;{&#10;Error:&quot;The orderId '&quot; ++ attributes.uriParams.ID as String ++ &quot;' is doesn't exist. Please enter the valid orderId!!!&quot;&#10;}]" doc:name="Set Payload" doc:id="30c9ca99-b74b-4824-85eb-29cbf3a19d54" />
+				<logger level="INFO" doc:name="Logger" doc:id="a6e8f56a-4ddf-4567-8fff-c64c2c853e70" />
+			</otherwise>
+		</choice>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="6132d364-ea38-4b74-be93-1033c6d5d156" type="ANY" >
+				<flow-ref doc:name="httpStatus-500" doc:id="79707aa2-b38e-48c6-a8e3-eeddb920809e" name="httpStatus-500" />
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="patchOrdersFlow" doc:id="b2c27a07-eb24-468c-bbf4-bfceddbbd041" >
+		<logger level="INFO" doc:name="Logger" doc:id="509d6932-7603-4081-a573-2096c4d241d8" message="patchOrdersFlow Started"/>
+		<db:query-single doc:name="getOrderToUpdate" doc:id="318073b7-cd24-4068-8624-f75741ab6ec2" config-ref="DB_AWS" target="getOrderToUpdate">
+			<db:sql><![CDATA[select orderId,userId,paymentStatus from test.orderDetails where orderId= :oid]]></db:sql>
+			<db:input-parameters><![CDATA[#[{oid: attributes.uriParams.ID}]]]></db:input-parameters>
+		</db:query-single>
+		<choice doc:name="orderUpdateC1" doc:id="e64324e0-75e2-416f-a399-d51fd1b1f9d7">
+			<when expression='#[vars.getOrderToUpdate.orderId == attributes.uriParams.ID as Number and vars.getOrderToUpdate.userId == payload.userId as Number and vars.getOrderToUpdate.paymentStatus == "Pending"]'>
+				<set-variable value="#[%dw 2.0&#10;output application/java&#10;---&#10;payload.itemDetails map (ob,in) -&gt; {&#10;	&#10;	orderId: vars.getOrderToUpdate.orderId,&#10;	name: ob.itemName,&#10;	category: ob.itemCategory,&#10;	quantity: ob.quantity&#10;	&#10;}]" doc:name="orderItemDetails" doc:id="8eb2af86-94b1-49e0-a3ed-ee834f82db65" variableName="orderItemDetails" />
+				<set-variable value="true" doc:name="orderRevert" doc:id="b0730c22-36b1-4bf7-9c91-13a919a283f1" variableName="orderRevert" />
+				<flow-ref doc:name="orderRevertFlow" doc:id="93bfc3be-23c5-4af3-96c5-c009824611dd" name="orderRevertFlow" target="orderRevertFlow" />
+				<flow-ref doc:name="orderCreationFlow" doc:id="aeb3c80d-8d92-4314-8262-df9221409d34" name="orderCreateFlow" target="orderCreationFlow" />
+				<choice doc:name="orderUpdateC2" doc:id="796b4fce-42a9-471a-80da-5f281d4788c5">
+					<when expression="#[not isEmpty(vars.orderCreationFlow.totalPrice)]">
+						<db:delete doc:name="itemDetailsDelete" doc:id="f48bbc77-d0ab-42cc-addc-8dc0b36a8a28" config-ref="DB_AWS" target="itemDetailsDelete">
+							<db:sql><![CDATA[delete from test.orderItemDetails where orderId= :oid]]></db:sql>
+							<db:input-parameters><![CDATA[#[{oid: vars.getOrderToUpdate.orderId}]]]></db:input-parameters>
+						</db:delete>
+						<db:update doc:name="updateOrder" doc:id="bd21850c-3837-47c5-bbad-b62e15924674" config-ref="DB_AWS" target="updateOrder">
+							<db:sql><![CDATA[update test.orderDetails SET orderDate=now(),totalAmount=:totalAmount where orderId= :oid]]></db:sql>
+							<db:input-parameters><![CDATA[#[{oid: vars.getOrderToUpdate.orderId,
+ totalAmount: vars.orderCreationFlow.totalPrice
+}]]]></db:input-parameters>
+						</db:update>
+						<ee:transform doc:name="Transform Message" doc:id="a1681f85-3ec9-485d-9836-0bce19840869">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+vars.orderItemDetails map (o,i) -> {
+	
+	itemName: o.name,
+	itemCategory: o.category,
+	quantity: o.quantity,
+	orderId: vars.getOrderToUpdate.orderId
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<db:bulk-insert doc:name="orderItemInsert" doc:id="b30c0643-a768-4d22-a37f-0ac66ba1391f" config-ref="DB_AWS" target="orderItemInsert">
+							<db:sql><![CDATA[insert into test.orderItemDetails (itemName,itemCategory,quantity,orderId) values (:itemName,:itemCategory,:quantity,:orderId)]]></db:sql>
+						</db:bulk-insert>
+						<set-payload value="#[output application/json&#10;---&#10;{&#10;Success:&quot;Your OrderId '&quot; ++ vars.getOrderToUpdate.orderId as String ++ &quot;' has been successfully Updated.&quot;&#10;}]" doc:name="Set Payload" doc:id="6b646a77-270c-4a5f-ba94-d1accce32b0e" />
+					</when>
+					<otherwise>
+						<set-variable value="false" doc:name="orderRevertNegative" doc:id="d2b2b142-f674-4c6a-a714-6d23eb40bf0c" variableName="orderRevert" />
+						<flow-ref doc:name="orderRevertFlowNegative" doc:id="d3170fdd-e6ec-4fd3-b6b6-cbd49515a606" name="orderRevertFlow" target="orderRevertFlowNegative" />
+						<set-payload value="#[output application/json&#10;---&#10;vars.orderCreationFlow map (o,i) -&gt;{&#10;Msg:&quot;The item '&quot; ++ o.name as String ++ &quot;:&quot; ++ vars.orderCreationFlow.category[i] as String ++ &quot;' is not available now. The current stock is '&quot; ++ vars.orderCreationFlow.quantity[i] as String ++ &quot;'. Sorry for the inconvenience!!!! &quot;&#10;&#10;}]" doc:name="Set Payload" doc:id="f1eeace9-a469-4537-912a-e3435a4d4521" />
+					</otherwise>
+				</choice>
+			</when>
+			<otherwise>
+				<ee:transform doc:name="Transform Message" doc:id="86b91bb9-1f09-4e9b-aa21-0336a18d13fb">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+fun ps(A:Number,B:Number,C:String) = 
+if (A != attributes.uriParams.ID as Number)
+'The OrderId ' ++ attributes.uriParams.ID as String ++ ' seems to be invalid. Kindly verify it!!!!!!!!"'
+else if (B != payload.userId as Number )
+'The UserId ' ++ payload.userId as String ++ ' seems to be invalid. Kindly verify it!!!!!!!!"'
+else if (C == "Completed" )
+'The OrderId ' ++ attributes.uriParams.ID as String ++ ' can not be updated since the Payment has been done. Please create a new order!!!!!!!!"'
+else
+"Unknown Error!!!!"
+---
+{
+Msg: ps(vars.getOrderToUpdate.orderId default 0,vars.getOrderToUpdate.userId default 0,vars.getOrderToUpdate.paymentStatus default '')
+}
+]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+			</otherwise>
+		</choice>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="f6721229-d131-4c79-b230-4246230968ff" type="ANY" >
+				<flow-ref doc:name="httpStatus-500" doc:id="cd296994-1dd0-4a36-8ebf-8aeeda1b48b8" name="httpStatus-500" />
+			</on-error-continue>
+		</error-handler>
+	</flow>
+</mule>
